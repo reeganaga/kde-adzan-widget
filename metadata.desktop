@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=Adzan Prayer Times
+Comment=Displays Islamic prayer times (Adzan) for a given location
+
+Type=Service
+Icon=clock
+X-KDE-ServiceTypes=Plasma/Applet
+
+X-Plasma-API=declarativeappletscript
+X-Plasma-MainScript=ui/main.qml
+
+X-KDE-PluginInfo-Author=rega
+X-KDE-PluginInfo-Email=regacg@gmail.com
+X-KDE-PluginInfo-Name=com.github.reeganaga.kdeadzan
+X-KDE-PluginInfo-Version=1.2
+X-KDE-PluginInfo-Website=rcg.my.id
+X-KDE-PluginInfo-Category=Date and Time
