@@ -8,6 +8,8 @@ Item {
 
     property alias cfg_address:       addressField.text
     property alias cfg_updateHour:    updateHourSpinBox.value
+    property alias cfg_minutesBefore: minutesBeforeSpinBox.value
+    property alias cfg_enableOverlayNotification: enableOverlayNotificationCheck.checked
     property alias cfg_showCountdown: showCountdownCheck.checked
 
     Kirigami.FormLayout {
@@ -25,6 +27,24 @@ Item {
             Kirigami.FormData.label: i18n("Daily update hour:")
             from: 0
             to:   23
+        }
+
+        SpinBox {
+            id:  minutesBeforeSpinBox
+            Kirigami.FormData.label: i18n("Notification offset:")
+            from: 0
+            to:   30
+            stepSize: 1
+            editable: true
+            textFromValue: function(value) {
+                return i18n("%1 minutes before", value)
+            }
+        }
+
+        CheckBox {
+            id: enableOverlayNotificationCheck
+            Kirigami.FormData.label: i18n("Fullscreen alert:")
+            text: i18n("Enable overlay notification")
         }
 
         CheckBox {

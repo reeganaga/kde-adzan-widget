@@ -1,5 +1,7 @@
 import QtQuick 2.9
 import QtQuick.Layouts 1.3
+import QtQuick.Window 2.12
+import QtGraphicalEffects 1.15
 import org.kde.plasma.core 2.0 as PlasmaCore
 import org.kde.plasma.components 2.0 as PlasmaComponents
 import org.kde.plasma.plasmoid 2.0
@@ -10,6 +12,8 @@ Item {
     // ── Config ─────────────────────────────────────────────────────────────────
     property string configAddress:       plasmoid.configuration.address
     property int    configUpdateHour:    plasmoid.configuration.updateHour
+    property int    configMinutesBefore: plasmoid.configuration.minutesBefore
+    property bool   configEnableOverlayNotification: plasmoid.configuration.enableOverlayNotification
     property bool   configShowCountdown: plasmoid.configuration.showCountdown
 
     // ── State ──────────────────────────────────────────────────────────────────
@@ -24,6 +28,16 @@ Item {
     property bool   isLoading:           false
     property string statusMessage:       ""
     property string activeCmd:           ""
+    property string activeAudioCmd:      ""
+
+    property bool   notificationVisible:          false
+    property bool   notificationIsNow:            false
+    property string notificationPrayerName:       ""
+    property int    notificationPrayerMinutes:    -1
+    property int    notificationMinutesRemaining: 0
+    property var    notifiedEvents:               ({})
+    property string lastNotificationDayKey:       ""
+    property var    overlayScreens:               []
 
     // ── Plasmoid properties ────────────────────────────────────────────────────
     // Force compact (text) view in the panel; popup opens on click
@@ -163,12 +177,21 @@ Item {
                 font.pixelSize: theme.smallestFont.pixelSize
             }
 
-            // ── Refresh button ─────────────────────────────────────────────────
-            PlasmaComponents.Button {
+            // ── Actions ────────────────────────────────────────────────────────
+            RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                text:    i18n("Refresh")
-                enabled: !root.isLoading
-                onClicked: root.fetchPrayerTimes()
+                spacing: units.smallSpacing
+
+                PlasmaComponents.Button {
+                    text:    i18n("Refresh")
+                    enabled: !root.isLoading
+                    onClicked: root.fetchPrayerTimes()
+                }
+
+                // PlasmaComponents.Button {
+                //     text: i18n("Test notif")
+                //     onClicked: root.triggerTestNotification()
+                // }
             }
         }
     }
@@ -183,6 +206,148 @@ Item {
         var parts = timeStr.split(" ")[0].split(":")
         if (parts.length < 2) return -1
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)
+    }
+
+    function dateKey(dateObj) {
+        return dateObj.getFullYear() + "-" + pad2(dateObj.getMonth() + 1) + "-" + pad2(dateObj.getDate())
+    }
+
+    function minuteDifference(targetMinutes, nowMinutes) {
+        var diff = targetMinutes - nowMinutes
+        if (diff < 0) diff += 24 * 60
+        return diff
+    }
+
+    function normalizedMinute(minutesValue) {
+        var dayMinutes = 24 * 60
+        return ((minutesValue % dayMinutes) + dayMinutes) % dayMinutes
+    }
+
+    function hasTriggered(dayKey, prayerName, phase) {
+        return root.notifiedEvents[dayKey + "|" + prayerName + "|" + phase] === true
+    }
+
+    function markTriggered(dayKey, prayerName, phase) {
+        root.notifiedEvents[dayKey + "|" + prayerName + "|" + phase] = true
+    }
+
+    function playAudioCommand(cmd) {
+        if (!cmd || cmd === "") return
+        if (root.activeAudioCmd !== "") {
+            audioDataSource.disconnectSource(root.activeAudioCmd)
+            root.activeAudioCmd = ""
+        }
+        root.activeAudioCmd = cmd
+        audioDataSource.connectSource(cmd)
+    }
+
+    function playReminderBeep() {
+        playAudioCommand("sh -c 'if command -v paplay >/dev/null; then paplay /usr/share/sounds/freedesktop/stereo/message.oga; elif command -v canberra-gtk-play >/dev/null; then canberra-gtk-play -i message; fi'")
+    }
+
+    function playAthanAudio() {
+        playAudioCommand("sh -c 'if [ -f \"$HOME/.local/share/adzan/athan.mp3\" ]; then if command -v mpv >/dev/null; then mpv --no-video --really-quiet \"$HOME/.local/share/adzan/athan.mp3\"; elif command -v ffplay >/dev/null; then ffplay -nodisp -autoexit -loglevel quiet \"$HOME/.local/share/adzan/athan.mp3\"; elif command -v paplay >/dev/null; then paplay /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga; fi; elif command -v paplay >/dev/null; then paplay /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga; fi'")
+    }
+
+    function refreshOverlayScreens() {
+        var screens = Qt.application.screens || []
+        var unique = []
+        var seen = ({})
+
+        for (var i = 0; i < screens.length; i++) {
+            var s = screens[i]
+            if (!s || !s.geometry) continue
+            var key = s.geometry.x + ":" + s.geometry.y + ":" + s.geometry.width + ":" + s.geometry.height
+            if (seen[key] === true) continue
+            seen[key] = true
+            unique.push(s)
+        }
+
+        if (unique.length === 0 && screens.length > 0) {
+            unique = screens
+        }
+
+        root.overlayScreens = unique
+    }
+
+    function showPreparation(prayerName, prayerMinutes) {
+        var now = new Date()
+        var nowMinutes = now.getHours() * 60 + now.getMinutes()
+
+        if (root.configEnableOverlayNotification) {
+            refreshOverlayScreens()
+            root.notificationVisible = true
+            root.notificationIsNow = false
+            root.notificationPrayerName = prayerName
+            root.notificationPrayerMinutes = prayerMinutes
+            root.notificationMinutesRemaining = minuteDifference(prayerMinutes, nowMinutes)
+        }
+        playReminderBeep()
+    }
+
+    function showNow(prayerName, prayerMinutes) {
+        if (root.configEnableOverlayNotification) {
+            refreshOverlayScreens()
+            root.notificationVisible = true
+            root.notificationIsNow = true
+            root.notificationPrayerName = prayerName
+            root.notificationPrayerMinutes = prayerMinutes
+            root.notificationMinutesRemaining = 0
+        }
+        playAthanAudio()
+    }
+
+    function dismissNotification() {
+        root.notificationVisible = false
+    }
+
+    function triggerTestNotification() {
+        var testName = root.nextPrayerName && root.nextPrayerName !== "" ? root.nextPrayerName : i18n("Prayer")
+        var now = new Date()
+        var nowMinutes = now.getHours() * 60 + now.getMinutes()
+
+        if (root.configMinutesBefore > 0) {
+            var simulatedPrayerMinutes = normalizedMinute(nowMinutes + root.configMinutesBefore)
+            showPreparation(testName, simulatedPrayerMinutes)
+        } else {
+            showNow(testName, nowMinutes)
+        }
+    }
+
+    function checkPrayerTriggers() {
+        if (!root.timings || Object.keys(root.timings).length === 0) return
+
+        var now = new Date()
+        var dayKey = dateKey(now)
+        var nowMinutes = now.getHours() * 60 + now.getMinutes()
+
+        if (root.lastNotificationDayKey !== dayKey) {
+            root.notifiedEvents = ({})
+            root.lastNotificationDayKey = dayKey
+        }
+
+        if (root.notificationVisible && !root.notificationIsNow && root.notificationPrayerMinutes >= 0) {
+            root.notificationMinutesRemaining = minuteDifference(root.notificationPrayerMinutes, nowMinutes)
+        }
+
+        for (var i = 0; i < root.prayerNames.length; i++) {
+            var prayerName = root.prayerNames[i]
+            var prayerMinutes = timeToMinutes(root.timings[prayerName])
+            if (prayerMinutes < 0) continue
+
+            if (root.configMinutesBefore > 0) {
+                var prepMinutes = normalizedMinute(prayerMinutes - root.configMinutesBefore)
+                if (nowMinutes === prepMinutes && !hasTriggered(dayKey, prayerName, "prep")) {
+                    markTriggered(dayKey, prayerName, "prep")
+                    showPreparation(prayerName, prayerMinutes)
+                }
+            }
+
+            if (nowMinutes === prayerMinutes && !hasTriggered(dayKey, prayerName, "main")) {
+                markTriggered(dayKey, prayerName, "main")
+                showNow(prayerName, prayerMinutes)
+            }
+        }
     }
 
     function computeCountdown() {
@@ -315,6 +480,22 @@ Item {
         }
     }
 
+    PlasmaCore.DataSource {
+        id: audioDataSource
+        engine: "executable"
+        connectedSources: []
+
+        onNewData: function(sourceName, data) {
+            if (sourceName !== root.activeAudioCmd) return
+            disconnectSource(sourceName)
+            root.activeAudioCmd = ""
+
+            if (data["exit code"] !== 0) {
+                console.log("[Adzan] Audio command failed:", data["stderr"] || "")
+            }
+        }
+    }
+
     // ── Timers ─────────────────────────────────────────────────────────────────
 
     // Updates "next prayer" every minute; triggers daily fetch at the configured hour
@@ -329,7 +510,16 @@ Item {
             } else {
                 root.updateNextPrayer()
             }
+            root.checkPrayerTriggers()
         }
+    }
+
+    // Checks every 10s to keep full-screen message and phase transitions in sync.
+    Timer {
+        interval: 10 * 1000
+        repeat:   true
+        running:  true
+        onTriggered: root.checkPrayerTriggers()
     }
 
     // ── React to config changes ────────────────────────────────────────────────
@@ -337,9 +527,131 @@ Item {
         target: plasmoid.configuration
         function onAddressChanged()    { root.fetchPrayerTimes() }
         function onUpdateHourChanged() { /* no immediate action needed */ }
+        function onMinutesBeforeChanged() {
+            root.notifiedEvents = ({})
+            root.checkPrayerTriggers()
+        }
+        function onEnableOverlayNotificationChanged() {
+            if (!root.configEnableOverlayNotification) {
+                root.dismissNotification()
+            }
+        }
         function onShowCountdownChanged() { root.nextPrayerCountdown = root.computeCountdown() }
     }
 
+    Instantiator {
+        id: overlayWindows
+          model: root.notificationVisible && root.configEnableOverlayNotification
+                    ? (root.overlayScreens.length > 0
+                        ? root.overlayScreens.length
+                        : ((Qt.application.screens && Qt.application.screens.length) ? Qt.application.screens.length : 1))
+                    : 0
+
+        delegate: Window {
+                property var screenObj: root.overlayScreens.length > 0
+                                                ? root.overlayScreens[index]
+                                                : ((Qt.application.screens && Qt.application.screens.length > index)
+                                                    ? Qt.application.screens[index]
+                                                    : null)
+                property var g: screenObj && screenObj.geometry
+                                     ? screenObj.geometry
+                                     : ({"x": 0, "y": 0, "width": 1920, "height": 1080})
+
+            visible: root.notificationVisible
+                flags: Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool
+            color: "transparent"
+                x: g.x
+                y: g.y
+                width: g.width
+                height: g.height
+
+            Rectangle {
+                id: backdropLayer
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#20334f" }
+                    GradientStop { position: 0.55; color: "#294e5e" }
+                    GradientStop { position: 1.0; color: "#132028" }
+                }
+
+                Rectangle {
+                    x: parent.width * 0.05
+                    y: parent.height * 0.12
+                    width: parent.width * 0.45
+                    height: parent.width * 0.45
+                    radius: width / 2
+                    color: "#70ffffff"
+                    opacity: 0.25
+                }
+
+                Rectangle {
+                    x: parent.width * 0.62
+                    y: parent.height * 0.58
+                    width: parent.width * 0.35
+                    height: parent.width * 0.35
+                    radius: width / 2
+                    color: "#55cce8f5"
+                    opacity: 0.3
+                }
+            }
+
+            ShaderEffectSource {
+                id: blurSource
+                anchors.fill: parent
+                sourceItem: backdropLayer
+                hideSource: true
+                live: true
+            }
+
+            FastBlur {
+                anchors.fill: parent
+                source: blurSource
+                radius: 84
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#7f0b1418"
+            }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 18
+
+                PlasmaComponents.Label {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.notificationIsNow
+                          ? i18n("Now")
+                          : i18n("Preparation")
+                    font.pixelSize: Math.max(36, Math.round(theme.defaultFont.pixelSize * 3.2))
+                    font.bold: true
+                    color: "#f3f8fb"
+                }
+
+                PlasmaComponents.Label {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.notificationIsNow
+                          ? i18n("%1 has started", root.notificationPrayerName)
+                          : i18n("%1 in %2 minutes", root.notificationPrayerName, root.notificationMinutesRemaining)
+                    font.pixelSize: Math.max(30, Math.round(theme.defaultFont.pixelSize * 2.3))
+                    font.bold: true
+                    color: "#f3f8fb"
+                }
+
+                PlasmaComponents.Button {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: i18n("Dismiss")
+                    onClicked: root.dismissNotification()
+                }
+            }
+        }
+    }
+
     // ── Initial load ───────────────────────────────────────────────────────────
-    Component.onCompleted: root.fetchPrayerTimes()
+    Component.onCompleted: {
+        root.refreshOverlayScreens()
+        root.fetchPrayerTimes()
+    }
 }

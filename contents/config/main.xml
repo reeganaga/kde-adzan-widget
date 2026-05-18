@@ -12,6 +12,12 @@
         <entry name="updateHour" type="Int">
             <default>9</default>
         </entry>
+        <entry name="minutesBefore" type="Int">
+            <default>5</default>
+        </entry>
+        <entry name="enableOverlayNotification" type="Bool">
+            <default>true</default>
+        </entry>
         <entry name="showCountdown" type="Bool">
             <default>false</default>
         </entry>

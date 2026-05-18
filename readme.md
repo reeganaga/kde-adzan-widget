@@ -23,11 +23,19 @@ The widget shows:
 - Daily auto-refresh at configurable hour (default: 09:00)
 - Manual refresh from popup
 - Automatic refresh when address is changed in settings
+- Fullscreen overlay notification with audio at prayer time
+- Configurable pre-prayer preparation alert with beep sound
 
 ## Requirements
 
 - Linux desktop with KDE Plasma
 - `curl` available in system PATH (used by the plasmoid for network requests)
+- `QtGraphicalEffects` QML module (for the overlay blur effect; included in most Plasma 5 installs)
+
+Optional for audio:
+- `mpv` or `ffplay` — for playing a custom athan MP3 (`~/.local/share/adzan/athan.mp3`)
+- `paplay` — PulseAudio player used as fallback for system sounds
+- `canberra-gtk-play` — alternative fallback beep source
 
 Optional development tools:
 - `plasmoidviewer`
@@ -81,6 +89,16 @@ Available config keys:
 	- Default: `false`
 	- If enabled, panel text shows countdown to next prayer.
 	- If disabled, panel text shows next prayer name and time.
+
+4. `minutesBefore` (int, 0-30)
+	- Default: `5`
+	- How many minutes before each prayer to show the preparation overlay and play a beep.
+	- Set to `0` to disable the pre-prayer alert (only the at-time notification fires).
+
+5. `enableOverlayNotification` (bool)
+	- Default: `true`
+	- Toggles the fullscreen overlay window for both the preparation and at-time notifications.
+	- When disabled, any currently visible overlay is dismissed immediately.
 
 ## How API Works in This Project
 
